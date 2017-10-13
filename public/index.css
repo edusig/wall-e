@@ -1,0 +1,56 @@
+main {
+    position: relative;
+    font-family: Verdana, Geneva, Tahoma, sans-serif;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.progress-bar {
+    height: 2em;
+    width: 50vw;
+    margin: 1em;
+    background-color: #eee;
+    border-radius: 2px;
+    display: inline-block;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.25) inset;
+}
+
+.progress {
+    background-image:
+        -webkit-linear-gradient(left, #FF9E44, #4f4);
+        border-radius: 2px; 
+        background-size: 100% 2em, 100% 100%, 100% 100%;
+    transition: width .2s linear;
+    height: 100%;
+}
+
+.download {
+    border-radius: 0.5em;
+    background-color: #ff6600;
+    color: #FFF;
+    padding: 1em 0.75em;
+    text-decoration: none;
+}
+
+.download:hover,
+.download:active,
+.download:focus {
+    background-color: #DA5700;
+}
+
+hr {
+    border: none;
+}
+
+.hidden  {
+    visibility: hidden;
+}
+
+.status {
+    font-size: 0.9em;
+}
+
+.status-error {
+    color: #F00;
+    font-weight: bold;
+}
