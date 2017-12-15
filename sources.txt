@@ -1,5 +1,4 @@
 https://en.wikipedia.org/wiki/List_of_HTTP_status_codes
-https://github.com/nickalie/go-mozjpegbin
 
 https://pngquant.org/
 http://optipng.sourceforge.net/
@@ -10,5 +9,4 @@ https://gist.github.com/rayrutjes/db9b9ea8e02255d62ce2
 https://astaxie.gitbooks.io/build-web-application-with-golang/content/en/04.5.html
 
 https://github.com/nickalie/go-mozjpegbin
-https://github.com/justinas/alice
 https://github.com/satori/go.uuid
