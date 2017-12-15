@@ -1,24 +1,28 @@
 <html !doctype>
     <head>
-        <title>Wall-E Image Compressor</title>
+        <title>WallE WebService</title>
         <link rel="stylesheet" href="/index.css" />
     </head>
     <body>
         <main>
-            <h1>Wall-e</h1>
-            <h2>(Web Advanced LossLess Encoder)</h2>
+            <h1 class="title">WallE</h1>
+            <h2 class="subtitle">(Web Advanced Lossless/Lossy Enhancer)</h2>
             <form class="upload" id="file_upload" enctype="multipart/form-data" action="/upload" method="post">
-                <div class="status">Supported file formats: JPEG, JPG and PNG</div><br>
-                <div id="file_upload_status" class="hidden status status-error">Error: one or more files are not supported.</div><br>
-                <input type="file" id="file" name="upload">
-                <input type="submit" value="Comprimir Imagem" />
+                <fieldset id="field_upload">
+                    <div class="status">Supported file formats: JPEG, JPG, PNG and GIF</div><br>
+                    <div id="file_upload_status" class="hidden status status-error">Error: one or more files are not supported.</div><br>
+                    <input type="file" id="file" name="upload">
+                    <input type="submit" value="Comprimir Imagem" />
+                </fieldset>
             </form>
             <div class="status hidden" id="status"></div>
             <div class="progress-bar hidden" id="progress_bar">
                 <div class="progress" id="progress"></div>
             </div>
             <hr/>
-            <a href="#download" class="hidden download" id="download_link">Download your file</a>
+            <a href="#" class="hidden download download-original" id="download_link_source">Download Original</a>
+            <a href="#" class="hidden download download-lossless" id="download_link_compressed">Download Lossless</a>
+            <a href="#" class="hidden download download-lossy" id="download_link_lossy">Download Lossy</a>
         </main>
         <script type="text/javascript" src="/index.js"></script>
     </body>

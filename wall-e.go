@@ -1,239 +1,238 @@
 package main
 
 import (
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
-	"image/jpeg"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"time"
 
-	"github.com/nickalie/go-mozjpegbin"
-
-	"github.com/justinas/alice"
 	"github.com/satori/go.uuid"
+
+	"github.com/edusig/wall-e/handler"
+	"github.com/edusig/wall-e/optimize"
 )
 
 type FileDetails struct {
-	URL  string `json:"url"`
-	Size int64  `json:"size"`
+	URL         string  `json:"url"`
+	Size        int64   `json:"size"`
+	SizeDiff    int64   `json:"sizeDiff,omitempty"`
+	PercentDiff float64 `json:"percentDiff,omitempty"`
 }
 
-type UploadResponse struct {
+type Upload struct {
 	Source     *FileDetails `json:"source"`
 	Compressed *FileDetails `json:"compressed"`
+	Lossy      *FileDetails `json:"lossy,omitempty"`
 	FileType   string       `json:"fileType"`
 }
 
-func compressJPEG(source string, destination string) (int64, error) {
-	var size int64
-	in, err := os.Open(source)
-	if err != nil {
-		return size, err
-	}
-	log.Println(source)
-	img, err := jpeg.Decode(in)
-	if err != nil {
-		return size, err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE, 0777)
-	if err != nil {
-		return size, err
-	}
-	defer out.Close()
-	if err := mozjpegbin.Encode(out, img, nil); err != nil {
-		log.Println("MOZJPEG ERROR")
-		return size, err
-	}
-	stat, err := out.Stat()
-	if err != nil {
-		return size, err
-	}
-	size = stat.Size()
-	return size, nil
+var allowedMimeTypes = map[string]string{
+	"image/jpeg": "jpg",
+	"image/png":  "png",
+	"image/gif":  "gif",
 }
 
-func mimeTypeToExt(mime string) string {
-	mimeExtension := map[string]string{
-		"image/jpeg": "jpg",
-		"image/png":  "png",
+var errorMimeTypeNotAllowed = errors.New("Mimetype not recognized")
+var errorMimeTypeEmpty = errors.New("Mimetype empty")
+var errorFileTypeNotAllowed = errors.New("File type not allowed")
+var errorMethodNowAllowed = errors.New(http.StatusText(http.StatusMethodNotAllowed))
+var errorNoCompression = errors.New("Could not reduce file size")
+
+func mimeTypeToExt(mime string) (string, error) {
+	if mime == "" {
+		return mime, errorMimeTypeEmpty
 	}
-	return mimeExtension[mime]
+	if mimeType, ok := allowedMimeTypes[mime]; ok {
+		return mimeType, nil
+	}
+	return "", errors.New("Mimetype not recognized")
 }
 
-func generateFileToken(fileName string) string {
-	f, err := os.Open(fileName)
-	if err != nil {
-		log.Fatal(err)
-		return ""
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
 	}
-	defer f.Close()
-	hasher := sha1.New()
-	if _, err := io.Copy(hasher, f); err != nil {
-		log.Fatal(err)
-	}
-	return hex.EncodeToString(hasher.Sum(nil))
+	return false
 }
 
 func isAllowedMimeType(fileType string) bool {
-	types := [2]string{"image/jpeg", "image/png"}
-	allowed := false
-	for i := 0; i < len(types); i++ {
-		if fileType == types[i] {
-			allowed = true
-			break
-		}
-	}
-	return allowed
+	types := []string{"image/jpeg", "image/png", "image/gif"}
+	return stringInSlice(fileType, types)
 }
 
-func logginHandler(next http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, r *http.Request) {
-		t1 := time.Now()
-		next.ServeHTTP(w, r)
-		t2 := time.Now()
-		log.Printf("[%s] %q %v\n", r.Method, r.URL.String(), t2.Sub(t1))
-	}
-	return http.HandlerFunc(fn)
-}
-
-func recoverHandler(next http.Handler) http.Handler {
-	fn := func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if err := recover(); err != nil {
-				log.Printf("panic: %+v\n", err)
-				http.Error(w, http.StatusText(500), 500)
-			}
-		}()
-		next.ServeHTTP(w, r)
-	}
-	return http.HandlerFunc(fn)
-}
-
-func readFileStream(w http.ResponseWriter, r *http.Request, dest string) string {
+func copyFormFile(r *http.Request, dest string) (string, error) {
 	var fileType string
-	mr, err := r.MultipartReader()
+
+	// Parse using 32mb
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		return fileType, err
+	}
+
+	// Opens uploaded file
+	file, _, err := r.FormFile("upload[file]")
 	if err != nil {
-		log.Print("MultipartReader Error: ")
-		log.Println(err)
-		return ""
+		return fileType, err
 	}
-	// length := r.ContentLength
-	// Start Reading File
-	for {
-		part, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		var read int64
-		// var p float32
-		dst, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE, 0777)
-		if err != nil {
-			log.Print("Open File Error: ")
-			log.Println(err)
-			return ""
-		}
-		defer dst.Close()
+	defer file.Close()
 
-		for {
-			buffer := make([]byte, 100000)
-			cBytes, err := part.Read(buffer)
-			if err == io.EOF {
-				break
-			}
-			read = read + int64(cBytes)
-			// p = float32(read) / float32(length) * 100
-			// log.Printf("progress: %f\n", p)
-
-			// After reading the first part of the file, checks the type
-			if fileType == "" {
-				fileType = http.DetectContentType(buffer[0:cBytes])
-				if !isAllowedMimeType(fileType) {
-					http.Error(w, http.StatusText(http.StatusUnsupportedMediaType), http.StatusUnsupportedMediaType)
-					log.Printf("Trying to upload a file with mime type: %s\n", fileType)
-					return ""
-				}
-			}
-			dst.Write(buffer[0:cBytes])
-		}
+	// Create a buffer to read the first 512 bytes, which is enough to detect the mimetype
+	buffer := make([]byte, 512)
+	if _, err := file.Read(buffer); err != nil {
+		return fileType, err
 	}
-	return fileType
+	file.Seek(0, 0)
+
+	fileType = http.DetectContentType(buffer)
+	if !isAllowedMimeType(fileType) {
+		log.Printf("Trying to upload a file with mime type: %s\n", fileType)
+		return fileType, errorFileTypeNotAllowed
+	}
+
+	// Creates the temp file to store the upload
+	source, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE, 0777)
+	if err != nil {
+		return fileType, err
+	}
+	defer source.Close()
+
+	// Copies the uploaded file to the temp file destination
+	if _, err := io.Copy(source, file); err != nil {
+		return fileType, err
+	}
+
+	return fileType, nil
 }
 
-func uploadHandler(w http.ResponseWriter, r *http.Request) {
+func deleteIfExists(filePath string) {
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		err := os.Remove(filePath)
+		if err != nil {
+			log.Printf("Could not remove file: %s", filePath)
+			return
+		}
+	}
+}
+
+func uploadHandler(env *handler.Env, w http.ResponseWriter, r *http.Request) error {
 	if r.Method == "POST" {
-		tempFileUUID := uuid.NewV4().String()
-		tempPath := "./temp/" + tempFileUUID
+		var response handler.Response
+		var lossyFile string
+		var lossyFilePath string
+		var lossyFileDetails FileDetails
 
-		mimeType := readFileStream(w, r, tempPath)
-		if mimeType == "" {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+		tempPath := "./temp/"
+		sourceFile := uuid.NewV4().String()
+		mimeType, err := copyFormFile(r, tempPath+sourceFile)
+		if err != nil {
+			if err == errorFileTypeNotAllowed {
+				return handler.FlowError{Err: err, Detail: "Supported file formats are: JPEG, JPG and PNG", Code: 0}
+			}
+			return err
 		}
-		fileType := mimeTypeToExt(mimeType)
+		// If something failed delete the temporary file
+		defer deleteIfExists(tempPath + sourceFile)
 
-		// Generates final folder based on random uuid
-		finalFolder := uuid.NewV4().String()
-		finalPath := "/uploads/" + finalFolder
-
-		// Creates new destionation folder
-		if err := os.Mkdir("./public/"+finalPath, 0777); err != nil {
-			log.Println(err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+		generateLossy := mimeType == "image/png"
+		fileType, err := mimeTypeToExt(mimeType)
+		if err != nil {
+			return err
 		}
 
-		// Generates final filename based on SHA-1 checksum
-		token := generateFileToken(tempPath)
-		sourceFilePath := finalPath + "/" + token + "." + fileType
-
-		// Moves the original file from temp path to the final destination
-		if err := os.Rename(tempPath, "./public/"+sourceFilePath); err != nil {
-			log.Println(err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+		compressedFile := uuid.NewV4().String()
+		if generateLossy {
+			lossyFile = uuid.NewV4().String()
 		}
 
 		//Compress File
-		compressedSize, err := compressJPEG("."+sourceFilePath, tempPath)
+		opt, err := optimize.File(tempPath+sourceFile, tempPath+compressedFile, tempPath+lossyFile)
 		if err != nil {
-			log.Println("Compression Error: ")
-			log.Print(err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+			return err
 		}
 
-		// Generates final filename based on SHA-1 checksum
-		token = generateFileToken(tempPath)
-		compressFilePath := finalPath + "/" + token + "." + fileType
+		// If something failed delete the temporary file
+		defer deleteIfExists(tempPath + compressedFile)
 
-		// Moves the compressed file from temp path to the final destination
-		if err := os.Rename(tempPath, "."+compressFilePath); err != nil {
-			log.Println(err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+		// Checks if uploaded file is already compressed by comparing file size with the compressed file
+		isAlreadyCompressed := false
+		// Minimal compression percentage to consider successfull
+		minDiffPercentage := 1.0
+		compressedDiff := opt.SizeBefore - opt.SizeAfter
+		var compressedP float64
+		var lossyDiff int64
+		var lossyP float64
+		if compressedDiff > 0 {
+			compressedP = float64(100 - (opt.SizeAfter / opt.SizeBefore * 100))
+			if compressedP < minDiffPercentage {
+				isAlreadyCompressed = true
+			}
+		} else {
+			isAlreadyCompressed = true
 		}
 
-		// Returns file stats and summary of compression
-		sourceFile := FileDetails{URL: sourceFilePath, Size: r.ContentLength}
-		compressedFile := FileDetails{URL: compressFilePath, Size: compressedSize}
-		fileCompressed := UploadResponse{Source: &sourceFile, Compressed: &compressedFile, FileType: mimeType}
-		log.Println(fileCompressed)
-		w.Header().Set("Content-type", "application/json")
-		json.NewEncoder(w).Encode(fileCompressed)
-	} else {
-		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		if generateLossy {
+			lossyDiff := opt.SizeBefore - opt.SizeLossy
+			if lossyDiff > 0 {
+				lossyP = float64(100 - (opt.SizeLossy / opt.SizeBefore * 100))
+				if lossyP >= minDiffPercentage {
+					isAlreadyCompressed = false
+				}
+			}
+		}
+
+		if !isAlreadyCompressed {
+			// Generates final folder based on random uuid
+			finalPath := "/uploads/" + uuid.NewV4().String()
+
+			sourceFilePath := finalPath + "/" + sourceFile + "." + fileType
+			compressFilePath := finalPath + "/" + compressedFile + "." + fileType
+			if generateLossy {
+				lossyFilePath = finalPath + "/" + lossyFile + "." + fileType
+			}
+
+			// Creates new destination folder
+			if err := os.Mkdir("./public/"+finalPath, 0777); err != nil {
+				return err
+			}
+			// Moves files from temp path to the final destination
+			if err := os.Rename(tempPath+sourceFile, "./public/"+sourceFilePath); err != nil {
+				return err
+			}
+			if err := os.Rename(tempPath+compressedFile, "./public/"+compressFilePath); err != nil {
+				return err
+			}
+			if generateLossy {
+				if err := os.Rename(tempPath+lossyFile, "./public/"+lossyFilePath); err != nil {
+					return err
+				}
+			}
+
+			sourceFileDetails := FileDetails{URL: sourceFilePath, Size: opt.SizeBefore}
+			compressedFileDetails := FileDetails{URL: compressFilePath, Size: opt.SizeAfter, SizeDiff: compressedDiff, PercentDiff: compressedP}
+			uploadResponse := Upload{Source: &sourceFileDetails, Compressed: &compressedFileDetails, FileType: mimeType}
+			if generateLossy {
+				lossyFileDetails = FileDetails{URL: lossyFilePath, Size: opt.SizeLossy, SizeDiff: lossyDiff, PercentDiff: lossyP}
+				uploadResponse.Lossy = &lossyFileDetails
+			}
+			response = handler.Response{Result: &uploadResponse, Success: true}
+			// Returns file stats and summary of compression
+			log.Println(response)
+			w.Header().Set("Content-type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return nil
+		}
+		return handler.FlowError{Err: errorNoCompression, Detail: "The compression could not reduce file size. Either your file is already compressed", Code: 1, Type: "NO_COMPRESSION"}
 	}
+	return handler.FlowError{Code: http.StatusMethodNotAllowed, Err: errorMethodNowAllowed}
 }
 
 func main() {
-	commonHandlers := alice.New(logginHandler, recoverHandler)
-	http.Handle("/", commonHandlers.Then(http.FileServer(http.Dir("./public"))))
-	http.Handle("/upload", commonHandlers.ThenFunc(uploadHandler))
+	env := &handler.Env{}
+	http.Handle("/", handler.LogginHandler(handler.RecoverHandler(http.FileServer(http.Dir("./public")))))
+	http.Handle("/upload", handler.LogginHandler(handler.RecoverHandler(handler.Handler{env, uploadHandler})))
 	log.Println("Starting server at http://localhost:8000/")
 	if err := http.ListenAndServe(":8000", nil); err != nil {
 		panic(err)

@@ -6,10 +6,14 @@
     eStatus = document.getElementById('status');
     eProgress = document.getElementById('progress');
     eProgressBar = document.getElementById('progress_bar');
-    eDownload = document.getElementById('download_link');
+    eDownloadSrc = document.getElementById('download_link_source');
+    eDownloadCmp = document.getElementById('download_link_compressed');
+    eDownloadLos = document.getElementById('download_link_lossy');
     eUploadStatus = document.getElementById('file_upload_status');
+    eForm = document.getElementById('file_upload');
+    eFieldset = document.getElementById('field_upload');
 
-    document.getElementById('file_upload').addEventListener('submit', onSubmitForm);
+    eForm.addEventListener('submit', onSubmitForm);
     document.getElementById('file').addEventListener('change', onFileChange);
 
     function onSubmitForm(e) {
@@ -20,9 +24,12 @@
         }
     
         eStatus.classList.remove('hidden');
-        eProgress.classList.remove('hidden');
-        eDownload.classList.add('hidden');
+        eProgressBar.classList.remove('hidden');
+        eDownloadSrc.classList.add('hidden');
+        eDownloadCmp.classList.add('hidden');
+        eDownloadLos.classList.add('hidden');
         eProgress.style.width = '0%';
+        eFieldset.disabled = true;
         
         var formData = new FormData();
         var file = document.getElementById('file');
@@ -59,10 +66,10 @@
     }
     
     function onRequestComplete(e) {
+        eFieldset.disabled = false;
         var xhr = e.target
         if(xhr.readyState == 4 && xhr.status == 200) {
             eStatus.innerHTML = 'Finished';
-            eDownload.classList.remove('hidden');
             try {
                 handleUploadResponse(JSON.parse(xhr.responseText))
             } catch(e) {
@@ -76,7 +83,7 @@
     
     function onUploadComplete(e) {
         eStatus.innerHTML = 'Upload Completed. Compressing...';
-        eProgress.classList.add('hidden');
+        eProgressBar.classList.add('hidden');
     }
     
     function onUploadProgress(e) {
@@ -85,24 +92,44 @@
         eProgress.style.width = p + '%';
     }
 
-    function handleUploadResponse(upload) {
+    function handleUploadResponse(data) {
+        const upload = data.result
         console.log('Upload Response', upload)
+        
         var srcSize = upload.source.size;
         var cmpSize = upload.compressed.size;
-        var diff = Math.abs(srcSize - cmpSize) / 1024;
+        
+        var diff = Math.abs(srcSize - cmpSize);
         var p = srcSize >= cmpSize ? cmpSize / srcSize : srcSize / cmpSize;
         p = 100 - (p * 100);
-        var status = 'Original File Size: ' + sizeFormat(srcSize, 2);
-        status += '<br>Compressed File Size: ' + sizeFormat(cmpSize, 2);
-        status += '<br>Saved: ' + sizeFormat(diff, 2) + ' (' + p.toFixed(2) + '%)';
-        console.log(status);
+        
+        var status = 'Original: ' + sizeFormat(srcSize, 2);
+        status += '<br><strong>Lossless</strong>: ' + sizeFormat(cmpSize, 2);
+        status += ' (' + sizeFormat(diff, 2) + ' -' + p.toFixed(2) + '%)';
+        
+        eDownloadSrc.href = upload.source.url;
+        eDownloadCmp.href = upload.compressed.url;
+        eDownloadSrc.classList.remove('hidden');
+        eDownloadCmp.classList.remove('hidden');
+        
+        if(upload.hasOwnProperty('lossy')) {
+            var losSize = upload.lossy.size;
+            var diffLossy = Math.abs(srcSize - losSize);
+            var pLossy = srcSize >= losSize ? losSize / srcSize : srcSize / losSize;
+            pLossy = 100 - (pLossy * 100);
+            status += '<br><strong>Lossy</strong>: ' + sizeFormat(losSize, 2);
+            status += ' (' + sizeFormat(diffLossy, 2) + ' -' + pLossy.toFixed(2) + '%)';
+            eDownloadLos.href = upload.lossy.url;
+            eDownloadLos.classList.remove('hidden');
+        }
+
         eStatus.innerHTML = status;
     }
 
     function sizeFormat(size, decimals) {
         var types = ['byte', 'kb', 'mb'];
         i = 0;
-        while(size >= 1024 && i < 2) {
+        while(size >= 1024 && i <= types.length) {
             size = size / 1024;
             i++
         }
