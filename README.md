@@ -28,13 +28,13 @@ A Webserver will start at localhost:8000
 
 Other features that would increasing learning:
 
-- [] Tests
-- [] Security analysis
-- [] Batch upload and optimization
-- [] Distributed optimization using message queues
-- [] Auto clean old uploads
-- [] LocalStorage to remember past upload url and stats
-- [] Use Reactjs practing (need more frontend feature to justify)
+- [ ] Tests
+- [ ] Security analysis
+- [ ] Batch upload and optimization
+- [ ] Distributed optimization using message queues
+- [ ] Auto clean old uploads
+- [ ] LocalStorage to remember past upload url and stats
+- [ ] Use Reactjs practing (need more frontend feature to justify)
 
 ### Sources
 
